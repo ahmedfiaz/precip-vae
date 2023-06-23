@@ -1,7 +1,7 @@
 # precip-vae
-<li>
-  <ol> Run preprocessing scripts to create training data using <strong>Preprocess_IMERG_ERA5.ipynb</strong> </ol>
-  <li>
+<ol>
+  <li> Run preprocessing scripts to create training data using <strong>Preprocess_IMERG_ERA5.ipynb</strong> </li>
+</ol>
     <ol> Optional: check imerg/ERA5 output using <strong>Check_imerg_output</strong> </ol>
   </li>
   <ol> Run training script using <strong>vae_z_train.ipynb</strong></ol>
