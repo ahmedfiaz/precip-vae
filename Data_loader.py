@@ -9,29 +9,55 @@ import random
 np.random.seed(0)
 random.seed(0)
 
+class Prc_norm:
+    def __init__(self, path):
+        self.path=path
+    def compute_norm(self):
+        prc=np.load(self.path)
+        self.prc_norm=prc.max()
+        self.precipitating_mean=prc[prc>0].mean()
+        self.precipitating_std=prc[prc>0].std()
+        
+class Thermo_norm:
+    def __init__(self, hbl_path, hlft_path, 
+                 hsat_lft_path):
+        
+        self.hbl_path=hbl_path
+        self.hlft_path=hlft_path
+        self.hsat_lft_path=hsat_lft_path
+        
+    def compute_norm(self):
+        hbl=np.load(self.hbl_path)
+        hlft=np.load(self.hlft_path)
+        hsat_lft=np.load(self.hsat_lft_path)
 
-conv_rain=np.load('/neelin2020/ML_input/gpm2a_dpr_era5/npy_files/conv_rain/gpm_conv_rain_2016_01_08.npy')
-prc_norm=conv_rain.max()
-prc_mean=conv_rain.mean()
+        instab=(hbl-hsat_lft)*340./hsat_lft
+        subsat=(hsat_lft-hlft)*340./hsat_lft
+        
+        self.instab_mean=instab.mean()
+        self.instab_std=instab.std()
+        
+        self.subsat_mean=subsat.mean()
+        self.subsat_std=subsat.std()
 
-prc_std=conv_rain.std()
-
-prc_log_transform=np.log(conv_rain[conv_rain>0]+1e-3)
-prc_log_std=prc_log_transform.std()
+            
 
 ### Declare training load ### 
 
 Dataset=torch.utils.data.Dataset
 
 class LoadTraining(Dataset):
-    def __init__(self, fils, prc_dir, prctm1_dir,
-                 prcorg_dir,batch_size, transform=None):
+    def __init__(self, fils, hlft_dir, 
+                 hsat_lft_dir, prc_dir,
+                 batch_size, transform=None):
+        
         self.fils = fils
         self.transform = transform
         self.size=0
+        
+        self.hlft_dir=hlft_dir
+        self.hsat_lft_dir=hsat_lft_dir
         self.prc_dir=prc_dir
-        self.prctm1_dir=prctm1_dir
-        self.prcorg_dir=prcorg_dir
         
         intervals=[]
         for fil in self.fils:
@@ -52,23 +78,66 @@ class LoadTraining(Dataset):
         batch_size=idx[2]
                 
         fil=self.fils[fil_idx]
-        date=dt.datetime.strptime(fil.split('lrh_')[-1].split('.npy')[0],"%Y_%m_%d")        
-        fils_prc=glob.glob(self.prc_dir+"gpm_conv_rain_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
-        fils_prctm1=glob.glob(self.prctm1_dir+"imerg_rain_bk_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
-        fils_prcorg=glob.glob(self.prcorg_dir+"gpm_conv_neighbor_rain_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
+        date=dt.datetime.strptime(fil.split('hbl_oceans_')[-1].split('.npy')[0],"%Y_%m_%d")        
+
+        fils_prc=glob.glob(self.prc_dir+"prc_oceans_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
+        fils_hlft=glob.glob(self.hlft_dir+"hlft_oceans_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
+        fils_hsat_lft=glob.glob(self.hsat_lft_dir+"hsat_lft_oceans_{}.npy".format(date.strftime("%Y_%m_%d")))[0]
         
-        lrh=np.load(fil,mmap_mode='r')[array_idx]
-        conv_prc=np.load(fils_prc,mmap_mode='r')[array_idx]
-        imerg_prc_tm1=np.load(fils_prctm1,mmap_mode='r')[array_idx]
-        conv_nn_prc=np.load(fils_prcorg,mmap_mode='r')[array_idx]
+        hbl=np.load(fil,mmap_mode='r')[array_idx]
+        hlft=np.load(fils_hlft,mmap_mode='r')[array_idx]
+        hsat_lft=np.load(fils_hsat_lft,mmap_mode='r')[array_idx]
+        prc=np.load(fils_prc,mmap_mode='r')[array_idx]
+                
+        ## convert hbl, hlft and hsat_lft to instab. and subsat ###
         
-        sample={'lrh':lrh,'conv_prc':conv_prc,
-                'imerg_prc_tm1':imerg_prc_tm1,
-                'conv_nn_prc':conv_nn_prc}
+        instab=(hbl-hsat_lft)*340./hsat_lft
+        subsat=(hsat_lft-hlft)*340./hsat_lft
+        
+        sample={'instab':instab,'subsat':subsat,
+                'prc':prc}
         
         if self.transform:
             sample=self.transform(sample)
         return sample
+    
+class Normalize:
+    def __init__(self, prc_norm, thermo_norm):
+        
+        self.prc_mean = prc_norm['prc_mean']
+        self.prc_std = prc_norm['prc_std']
+        
+        self.instab_mean = thermo_norm['instab_mean']
+        self.instab_std = thermo_norm['instab_std']
+        
+        self.subsat_mean = thermo_norm['subsat_mean']
+        self.subsat_std = thermo_norm['subsat_std']
+
+    def __normalize(self, x,xbar,normalizer):
+        return (x-xbar)/normalizer
+
+
+    def __call__(self, sample):
+        
+        instab_normed=self.__normalize(sample['instab'],self.instab_mean,
+                                    self.instab_std)
+
+        subsat_normed=self.__normalize(sample['subsat'],self.subsat_mean,
+                                    self.subsat_std)
+
+        
+        prc_normed=self.__normalize(sample['prc'],self.prc_mean,
+                                    self.prc_std)
+
+        cond_finite=np.logical_and(np.isfinite(instab_normed),
+                                   np.isfinite(prc_normed))
+        
+        
+        return {'instab':np.float32(instab_normed[cond_finite]),
+                'subsat':np.float32(subsat_normed[cond_finite]),
+                'prc':np.float32(prc_normed[cond_finite])}
+        
+       
         
 class Custom_Sampler(Sampler):
     
@@ -76,6 +145,9 @@ class Custom_Sampler(Sampler):
         self.batch_size=batch_size
         self.train_size=train_size
         self.array_sizes=array_sizes
+        
+    def __len__(self):
+        return self.train_size//self.batch_size
         
     def __iter__(self):
 
@@ -98,6 +170,8 @@ class Custom_Sampler(Sampler):
         self.num_batches=random_array_indx.size//self.batch_size
 
         random_start_indices=np.arange(random_file_indx.size)[:: self.batch_size].astype(int)
+        ### turned off random shuffle ###
+        
         np.random.shuffle(random_start_indices)
 
         assert random_start_indices.size==self.num_batches
@@ -110,51 +184,6 @@ class Custom_Sampler(Sampler):
             yield [random_file_indx[idx_random],random_array_indx[array_ind], self.batch_size]
         
         
-    def __len__(self):
-        return self.train_size//self.batch_size
 
         
-class Normalize:
-    def __init__(self, prc_norm, lrh_norm):
-        
-        self.prc_xbar = prc_norm['xbar']
-        self.lrh_xbar = lrh_norm['xbar']
-        
-        self.prc_normalizer = prc_norm['normalizer']
-        self.lrh_normalizer = lrh_norm['normalizer']
 
-    def __normalize(self, x,xbar,normalizer):
-        return (x-xbar)/normalizer
-
-    def __log_transform(self, x, normalizer):
-        x=np.log(x+1e-3)
-        return x/normalizer +1 
-        
-
-    def __call__(self, sample):
-        lrh_normed=self.__normalize(sample['lrh'],self.lrh_xbar,
-                                    self.lrh_normalizer)
-        
-        conv_prc_normed=self.__normalize(sample['conv_prc'],self.prc_xbar,
-                                    self.prc_normalizer)
-
-        imerg_prc_tm1_normed=self.__normalize(sample['imerg_prc_tm1'],self.prc_xbar,
-                            self.prc_normalizer)
-
-        conv_nn_prc_normed=self.__normalize(sample['conv_nn_prc'],self.prc_xbar,
-                    self.prc_normalizer)
-
-#         conv_prc_normed=self.__log_transform(sample['conv_prc'],self.prc_normalizer)
-#         imerg_prc_tm1_normed=self.__log_transform(sample['imerg_prc_tm1'],self.prc_normalizer)
-#         conv_nn_prc_normed=self.__log_transform(sample['conv_nn_prc'],self.prc_normalizer)
-
-        
-        cond_finite=np.logical_and(np.isfinite(lrh_normed),np.isfinite(imerg_prc_tm1_normed))
-        
-        
-        return {'lrh':np.float32(lrh_normed[cond_finite]), 
-                'conv_prc':np.float32(conv_prc_normed[cond_finite]),
-                'imerg_prc_tm1':np.float32(imerg_prc_tm1_normed[cond_finite]),
-                'conv_nn_prc':np.float32(conv_nn_prc_normed[cond_finite])}
-        
-       
