@@ -5,11 +5,7 @@ import glob
 import datetime as dt
 import random
 
-
-np.random.seed(0)
-random.seed(0)
-
-class Prc_norm:
+class PrcNorm:
     def __init__(self, path):
         self.path=path
     def compute_norm(self):
@@ -18,7 +14,7 @@ class Prc_norm:
         self.precipitating_mean=prc[prc>0].mean()
         self.precipitating_std=prc[prc>0].std()
         
-class Thermo_norm:
+class ThermoNorm:
     def __init__(self, hbl_path, hlft_path, 
                  hsat_lft_path):
         
@@ -39,8 +35,6 @@ class Thermo_norm:
         
         self.subsat_mean=subsat.mean()
         self.subsat_std=subsat.std()
-
-            
 
 ### Declare training load ### 
 
@@ -71,8 +65,7 @@ class LoadTraining(Dataset):
         return self.size
     
     def __getitem__(self, idx):
-                
-        
+
         fil_idx=idx[0]
         array_idx=idx[1]
         batch_size=idx[2]
@@ -139,7 +132,7 @@ class Normalize:
         
        
         
-class Custom_Sampler(Sampler):
+class CustomSampler(Sampler):
     
     def __init__(self, train_size, batch_size, array_sizes):
         self.batch_size=batch_size
@@ -183,7 +176,7 @@ class Custom_Sampler(Sampler):
             assert np.all(random_file_indx[array_ind]==fil_num)
             yield [random_file_indx[idx_random],random_array_indx[array_ind], self.batch_size]
         
-        
+
 
         
 
